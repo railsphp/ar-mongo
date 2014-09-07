@@ -1,0 +1,5 @@
+{
+    "name": "railsphp/ar-mongo",
+    "description": "ActiveRecord models with MongoDB persistence",
+    "license": "MIT"
+}
