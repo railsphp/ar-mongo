@@ -45,11 +45,11 @@ abstract class Base extends Document\Document
     public function dbRef()
     {
         if ($this->isPersisted()) {
-            return MongoDBRef::create(
-                $this->collectionName(),
-                $this->id(),
-                $this->connection()->databaseName()
-            );
+            return [
+                '$ref' => (string)$this->collectionName(),
+                '$id'  => (string)$this->id(),
+                '$db'  => (string)$this->connection()->databaseName()
+            ];
         }
     }
     

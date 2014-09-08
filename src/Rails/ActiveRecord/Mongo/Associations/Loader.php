@@ -20,6 +20,14 @@ class Loader extends BaseLoader
     
     protected function loadHasOne($record, $name, array $options)
     {
+        if (!empty($options['embedded'])) {
+            $className  = $options['className'];
+            $attributes = $record->getAttribute($name) ?: [];
+            $relation   = new $className($attributes, $record);
+            $record->getAttributes()->setRaw($name, $relation);
+            return $relation;
+        }
+        
         $query = $this->buildQuery($options);
         $query->where([
             $options['reference'] . '.$id' => $record->id()
@@ -83,9 +91,7 @@ class Loader extends BaseLoader
             }
             
             $array = new EmbeddedArray($members, $name, $className, $record);
-            
             $record->getAttributes()->setRaw($name, $array);
-            
             return $array;
         }
         

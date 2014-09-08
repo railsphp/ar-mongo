@@ -77,17 +77,16 @@ trait DocumentTrait
         
         $associations = Associations::forClass(get_called_class());
         
-        // $assocs =->embedded();
-        // vpe($assocs);
-        // if ($assocs['embedded']) {
-            // foreach ($assocs['embedded'] as $name => $type) {
         foreach ($associations->embedded() as $name => $type) {
             $set->addAttribute(new Attribute($name, 'array'));
         }
         
         foreach ($associations->associations() as $name => $options) {
-            if ($options['type'] == 'belongsTo') {
-                $set->addAttribute(new Attribute($name, 'array'));
+            switch ($options['type']) {
+                case 'belongsTo':
+                case 'hasOne':
+                    $set->addAttribute(new Attribute($name, 'array'));
+                    break;
             }
         }
         

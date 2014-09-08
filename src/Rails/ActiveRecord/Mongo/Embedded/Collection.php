@@ -158,6 +158,13 @@ class Collection extends BaseCollection
         $this->addMember($value);
     }
     
+    public function reset(array $members)
+    {
+        $this->members = [];
+        $this->addMembers($members);
+        return $this;
+    }
+    
     protected function generateUpdateScript()
     {
         $set = [];

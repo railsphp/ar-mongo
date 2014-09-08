@@ -220,6 +220,30 @@ class Relation implements \IteratorAggregate, \Countable, RelationInterface
         return $this->createCursor()->count();
     }
     
+    public function firstOrCreate(array $attributes = [])
+    {
+        $model = $this->first();
+        if (!$model) {
+            $model = $this->create($attributes);
+        }
+        return $model;
+    }
+    
+    public function create(array $attributes = [])
+    {
+        $model = $this->initialize($attributes);
+        $model->save();
+        return $model;
+    }
+    
+    public function initialize(array $attributes = [])
+    {
+        $modelClass = $this->modelClass;
+        $attributes = array_merge($this->attributes, $attributes);
+        $model      = new $modelClass($attributes);
+        return $model;
+    }
+    
     protected function orderByIdIfUnordered()
     {
         if (!$this->order) {
@@ -232,7 +256,7 @@ class Relation implements \IteratorAggregate, \Countable, RelationInterface
     {
         $rel = $this->currentOrClone();
         $modelClass = $this->modelClass;
-        
+        \Rails::log(Attributes::getAttributesFor($modelClass)->getAttribute($modelClass::primaryKey())->type() == 'mongoId');
         if (Attributes::getAttributesFor($modelClass)->getAttribute($modelClass::primaryKey())->type() == 'mongoId') {
             if (!$id instanceof MongoId) {
                 $id = new MongoId($id);
@@ -246,7 +270,7 @@ class Relation implements \IteratorAggregate, \Countable, RelationInterface
                 "Couldn't find %s with %s=%s",
                 $this->modelClass,
                 $modelClass::primaryKey(),
-                $id
+                (string)$id
             ));
         }
         return $first;
@@ -324,6 +348,9 @@ class Relation implements \IteratorAggregate, \Countable, RelationInterface
         }
         if ($this->limit) {
             $cursor->limit($this->limit);
+        }
+        if ($this->order) {
+            $cursor->sort($this->order);
         }
         return $cursor;
     }
