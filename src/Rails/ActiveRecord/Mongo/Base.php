@@ -76,4 +76,38 @@ abstract class Base extends Document\Document
         }
         return false;
     }
+    
+    public function reload()
+    {
+        $this->loadedAssociations = [];
+        return parent::reload();
+    }
+    
+    public function hasChanged()
+    {
+        return $this->attributes->dirty()->hasChanged() || $this->embeddedAssocsChanged();
+    }
+    
+    public function embeddedAssocsChanged()
+    {
+        $changed = false;
+        foreach ($this->getAssociations()->embedded() as $name => $type) {
+            $object = $this->getAssociation($name);
+            
+            if ($type == 'hasMany') {
+                foreach ($object as $model) {
+                    if ($model->hasChanged()) {
+                        $changed = true;
+                        break 2;
+                    }
+                }
+            } else {
+                if ($object->hasChanged()) {
+                    $changed = true;
+                    break;
+                }
+            }
+        }
+        return $changed;
+    }
 }

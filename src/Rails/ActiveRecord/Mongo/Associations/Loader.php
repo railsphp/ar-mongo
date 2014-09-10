@@ -3,7 +3,6 @@ namespace Rails\ActiveRecord\Mongo\Associations;
 
 use Rails\ActiveRecord\Associations\Loader as BaseLoader;
 use Rails\ActiveRecord\Mongo\Embedded\Collection as EmbeddedArray;
-// use Rails\ActiveRecord\Mongo\Associations\CollectionProxy;
 
 class Loader extends BaseLoader
 {

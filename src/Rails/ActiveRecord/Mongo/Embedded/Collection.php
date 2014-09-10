@@ -25,15 +25,14 @@ class Collection extends BaseCollection
         'insertions' => []
     ];
     
+    protected $allMembers = [];
+    
     public function __construct(array $members = [], $name, $membersClass, ParentDocument $parent)
     {
         $this->parent = $parent;
         $this->name = $name;
         $this->membersClass = $membersClass;
-        
         $this->resetMembers($members);
-        
-        parent::__construct($members);
     }
     
     public function parent()
@@ -67,40 +66,60 @@ class Collection extends BaseCollection
             $id = 'ObjectId("' . (string)$id . '")';
         }
         
+        $primaryKey = $this->parent->primaryKey();
+        $unset = $set = $push = '';
+        
+        if ($update['unset']) {
+            $unset = sprintf(
+                'db[coll].update({%s: _id}, %s);',
+                $primaryKey,
+                json_encode($update['unset'])
+            );
+        }
+        if ($update['set']) {
+            $set = sprintf(
+                'db[coll].update({%s: _id}, %s);',
+                $primaryKey,
+                json_encode($update['set'])
+            );
+        }
+        if ($update['push']) {
+            $push = sprintf(
+                'db[coll].update({%s: _id}, %s);',
+                $primaryKey,
+                json_encode($update['push'])
+            );
+        }
+        
         $script = sprintf(
             "var _id  = %s;\n" .
             "var coll = \"%s\";\n" .
-            "db[coll].update({%s: _id}, %s);\n" .
+            "%s\n" .
+            "%s\n" .
+            "%s\n" .
             "var records = [];\n" .
             "var cursor = db[coll].find({%s: _id}, {%s: 1});\n" .
             "cursor.forEach(function(r) { records.push(r); });\n" .
             "return records;",
             $id,
             $this->parent->collectionName(),
-            $this->parent->primaryKey(),
-            json_encode($update),
             
-            $this->parent->primaryKey(),
+            $unset,
+            $set,
+            $push,
+            
+            $primaryKey,
             $this->name
         );
         
         $resp = $this->parent->connection()->execute($script);
-        
-        $this->changes = [
-            'deletions'  => [],
-            'insertions' => []
-        ];
+        $this->discardChanges();
         
         if (isset($resp['retval'][0][$this->name])) {
-            $this->resetMembers($resp['retval'][0][$this->name], true);
+            $this->resetMembers($resp['retval'][0][$this->name]);
         }
         
         return $resp;
-    }
-    
-    public function updateMember($member)
-    {
-        $this->validateMember($member);
     }
     
     public function generatePersistenceScript()
@@ -110,34 +129,39 @@ class Collection extends BaseCollection
             $unset = $this->generateUnsetScript();
             $push  = $this->generatePushScript();
             
-            $update = [];
-            if ($set) {
-                $update['$set']   = $set;
+            $update = [
+                'unset' => [],
+                'set'   => [],
+                'push'  => []
+            ];
+            
+            if (!$unset && !$set && !$push) {
+                return [];
             }
+            
             if ($unset) {
-                $update['$unset'] = $unset;
+                $update['unset']['$unset'] = $unset;
+            }
+            if ($set) {
+                $update['set']['$set']     = $set;
             }
             if ($push) {
-                $update['$push']  = $push;
+                $update['push']['$push']   = $push;
             }
             
             return $update;
-        } else {
-            $this->generateInsertScript();
-        } 
+        }
     }
     
     public function addMembers(array $members)
     {
+        $this->validateMembers($members, false);
         $membersClass = $this->membersClass;
+        
         foreach ($members as $member) {
-            if (is_array($member)) {
-                $member = new $membersClass($member, $this->parent);
-            } else {
-                $this->validateMember($member);
-            }
             $member->setCollection($this);
-            $this->members[] = $member;
+            $this->members[]    = $member;
+            $this->allMembers[] = $member;
             $this->changes['insertions'][] = $member;
         }
         return $this;
@@ -160,22 +184,30 @@ class Collection extends BaseCollection
     
     public function reset(array $members)
     {
+        $this->discardChanges();
+        foreach ($this->members as $member) {
+            $this->markForDestroy($member);
+        }
+        
         $this->members = [];
+        $this->allMembers = [];
         $this->addMembers($members);
+        foreach ($this->members as $member) {
+            $member->getAttributes()->dirty()->changesApplied();
+        }
+        
         return $this;
     }
     
     protected function generateUpdateScript()
     {
         $set = [];
-        
         $parentClass = get_class($this->parent);
         
-        foreach ($this->members as $key => $member) {
+        foreach ($this->allMembers as $key => $member) {
             if ($member === null) {
                 continue;
             }
-            
             $this->validateMember($member);
             
             foreach ($member->changes() as $attrName => $change) {
@@ -200,8 +232,8 @@ class Collection extends BaseCollection
     
     protected function generateUnsetScript()
     {
-        $unset  = [];
-        $name = $this->name;
+        $unset = [];
+        $name  = $this->name;
         
         foreach ($this->changes['deletions'] as $key) {
             $unset[$name . '.' . $key] = "";
@@ -210,41 +242,59 @@ class Collection extends BaseCollection
         return $unset;
     }
     
-    protected function validateMembers(array $members, $asArrays = false)
+    protected function validateMembers(array &$members, $allowNulls = true)
     {
-        foreach ($members as $member) {
-            if ($asArrays && is_array($member)) {
+        $membersClass = $this->membersClass;
+        
+        foreach ($members as $index => $member) {
+            if (is_array($member)) {
+                $members[$index] = $member = new $membersClass($member, $this->parent);
+                $member->setCollection($this);
+                $member->setMemberIndex($index);
+            } elseif ($allowNulls && $member === null) {
                 continue;
             } elseif ($member !== null && !$member instanceof $this->membersClass) {
+                if (is_object($member)) {
+                    $type = 'instance of ' . get_class($member);
+                } else {
+                    $type = gettype($member);
+                }
                 throw new Exception\RuntimeException(sprintf(
-                    "A member of the collection is not an instance of %s",
-                    $this->membersClass
+                    "A member of the collection is not an instance of %s, received %s",
+                    $this->membersClass,
+                    $type
                 ));
             }
         }
     }
     
-    protected function validateMember($member)
+    protected function validateMember($member, $allowNulls = true)
     {
-        $this->validateMembers([$member]);
+        $members = [$member];
+        $this->validateMembers($members, $allowNulls);
     }
     
-    protected function resetMembers(array $members, $asArrays = false)
+    protected function resetMembers(array $members)
     {
-        $this->members = [];
-        $this->validateMembers($members, $asArrays);
-        $membersClass = $this->membersClass;
+        $this->members    = [];
+        $this->allMembers = [];
+        $this->validateMembers($members);
         
         foreach ($members as $index => $member) {
             if ($member !== null) {
-                if ($asArrays && is_array($member)) {
-                    $member = new $membersClass($member, $this->parent);
-                }
                 $member->setCollection($this);
                 $member->setMemberIndex($index);
+                $this->members[] = $member;
             }
+            $this->allMembers[] = $member;
         }
-        
-        $this->members = $members;
+    }
+    
+    protected function discardChanges()
+    {
+        $this->changes = [
+            'deletions'  => [],
+            'insertions' => []
+        ];
     }
 }

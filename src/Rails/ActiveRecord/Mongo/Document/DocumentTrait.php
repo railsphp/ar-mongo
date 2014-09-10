@@ -165,4 +165,14 @@ trait DocumentTrait
         $accProps = AccessibleProperties::getProperties(get_called_class());
         $this->filterProperties($attributes, $accProps);
     }
+    
+    protected function setupValidator()
+    {
+        $validator = parent::setupValidator();
+        $validator->setValidator(
+            'uniqueness',
+            'Rails\ActiveRecord\Mongo\Validator\Validations\UniquenessValidator'
+        );
+        return $validator;
+    }
 }

@@ -239,7 +239,7 @@ class Relation implements \IteratorAggregate, \Countable, RelationInterface
     public function initialize(array $attributes = [])
     {
         $modelClass = $this->modelClass;
-        $attributes = array_merge($this->attributes, $attributes);
+        $attributes = array_merge($this->where, $attributes);
         $model      = new $modelClass($attributes);
         return $model;
     }
@@ -256,7 +256,7 @@ class Relation implements \IteratorAggregate, \Countable, RelationInterface
     {
         $rel = $this->currentOrClone();
         $modelClass = $this->modelClass;
-        \Rails::log(Attributes::getAttributesFor($modelClass)->getAttribute($modelClass::primaryKey())->type() == 'mongoId');
+        
         if (Attributes::getAttributesFor($modelClass)->getAttribute($modelClass::primaryKey())->type() == 'mongoId') {
             if (!$id instanceof MongoId) {
                 $id = new MongoId($id);

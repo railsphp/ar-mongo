@@ -23,22 +23,24 @@ trait AssociableModelTrait
      */
     public function getAssociation($name, $autoLoad = true)
     {
-        $assocs = $this->getAssociations();
-        
-        // if ($assocs->isEmbedded($methodName)) {
-            // if (isset($this->loadedAssociations[$name])) {
-                // return $this->getAttribute($name);
-            // }
-        // }
-        
         if (isset($this->loadedAssociations[$name])) {
             return $this->loadedAssociations[$name];
-        } elseif ($autoLoad && $this->getAssociations()->exists($name)) {
-            $this->loadedAssociations[$name] =
-                $assocs->load($this, $name);
-            return $this->loadedAssociations[$name];
+        } elseif ($this->getAssociations()->exists($name)) {
+            if ($autoLoad) {
+                $assocs = $this->getAssociations();
+                $this->loadedAssociations[$name] =
+                    $assocs->load($this, $name);
+                return $this->loadedAssociations[$name];
+            } else {
+                return null;
+            }
         }
-        return null;
+        
+        throw new \Exception(sprintf(
+            "Association %s::%s doesn't exist",
+            get_called_class(),
+            $name
+        ));
     }
     
     /**

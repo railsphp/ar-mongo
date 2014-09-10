@@ -100,6 +100,9 @@ class Associations
         return array_key_exists($name, $this->associations());
     }
     
+    /**
+     * Loading embedded associations that are already loaded will cause an error.
+     */
     public function load($record, $name)
     {
         if (!$this->exists($name)) {
