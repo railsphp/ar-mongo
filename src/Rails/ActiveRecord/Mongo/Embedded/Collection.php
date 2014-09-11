@@ -21,8 +21,9 @@ class Collection extends BaseCollection
     protected $membersClass;
     
     protected $changes = [
-        'deletions'  => [],
-        'insertions' => []
+        'deletions'    => [],
+        'insertions'   => [],
+        'replacements' => []
     ];
     
     protected $allMembers = [];
@@ -126,24 +127,26 @@ class Collection extends BaseCollection
     {
         if ($this->parent->isPersisted()) {
             $set   = $this->generateUpdateScript();
+            $repl  = $this->generateReplacementScript();
             $unset = $this->generateUnsetScript();
             $push  = $this->generatePushScript();
             
             $update = [
                 'unset' => [],
                 'set'   => [],
-                'push'  => []
+                'push'  => [],
+                'repl'  => [],
             ];
             
-            if (!$unset && !$set && !$push) {
+            if (!$unset && !$set && !$push && !$repl) {
                 return [];
             }
             
             if ($unset) {
                 $update['unset']['$unset'] = $unset;
             }
-            if ($set) {
-                $update['set']['$set']     = $set;
+            if ($set || $repl) {
+                $update['set']['$set'] = array_merge($set, $repl);
             }
             if ($push) {
                 $update['push']['$push']   = $push;
@@ -156,13 +159,8 @@ class Collection extends BaseCollection
     public function addMembers(array $members)
     {
         $this->validateMembers($members, false);
-        $membersClass = $this->membersClass;
-        
         foreach ($members as $member) {
-            $member->setCollection($this);
-            $this->members[]    = $member;
-            $this->allMembers[] = $member;
-            $this->changes['insertions'][] = $member;
+            $this->addNewMember($member);
         }
         return $this;
     }
@@ -175,11 +173,6 @@ class Collection extends BaseCollection
     public function markForDestroy($member)
     {
         $this->changes['deletions'][] = $member->memberIndex();
-    }
-    
-    public function offsetSet($offset, $value)
-    {
-        $this->addMember($value);
     }
     
     public function reset(array $members)
@@ -199,19 +192,105 @@ class Collection extends BaseCollection
         return $this;
     }
     
+    public function offsetSet($offset, $member)
+    {
+        $members = [$member];
+        $this->validateMembers($members, false);
+        $member = $members[0];
+        $this->setOrReplace($offset, $member);
+    }
+    
+    /**
+     * $member must be validated.
+     */
+    protected function addNewMember($member)
+    {
+        $member->setCollection($this);
+        $this->members[]    = $member;
+        $this->allMembers[] = $member;
+        $this->changes['insertions'][] = $member;
+    }
+    
+    public $foo;
+    /**
+     * $members is array of documents
+     */
+    public function set(array $members)
+    {
+        foreach ($members as $index => $member) {
+            $this->setOrReplace($index, $member);
+        }
+        return $this;
+    }
+    
+    /**
+     * $member must be validated.
+     */
+    protected function setOrReplace($offset, $member)
+    {
+        if ($this->offsetExists($offset)) {
+            if ($this->members[$offset] === null) {
+                $this->changes['replacements'][$offset] = $member;
+            } else {
+                if (is_array($member)) {
+                    foreach ($member as $attrName => $value) {
+                        $this->members[$offset]->$attrName = $value;
+                    }
+                } elseif (is_object($member)) {
+                    $this->validateMember($member);
+                    $member->setMemberIndex($offset);
+                    $this->changes['replacements'][$offset] = $member;
+                } else {
+                    throw new Exception\InvalidArgumentException(sprintf(
+                        "Expected array or instance of %s, passed %s",
+                        $this->membersClass,
+                        $this->varTypeForMsg($member)
+                    ));
+                }
+            }
+        } else {
+            $members = [$member];
+            $this->validateMembers($members);
+            $this->addNewMember($members[0]);
+        }
+    }
+    
     protected function generateUpdateScript()
     {
         $set = [];
         $parentClass = get_class($this->parent);
         
         foreach ($this->allMembers as $key => $member) {
-            if ($member === null) {
+            if (
+                $member === null ||
+                isset($this->changes['replacements'][$key]) ||
+                in_array($member, $this->changes['insertions'])
+            ) {
                 continue;
             }
             $this->validateMember($member);
             
             foreach ($member->changes() as $attrName => $change) {
                 $set[$this->name . '.' . $key . '.' . $attrName] = $change[1];
+            }
+        }
+        
+        return $set;
+    }
+    
+    protected function generateReplacementScript()
+    {
+        $set = [];
+        $parentClass = get_class($this->parent);
+        
+        foreach ($this->changes['replacements'] as $key => $member) {
+            if ($member === null) {
+                continue;
+            }
+            $this->validateMember($member);
+            
+            foreach ($member->attributes() as $attrName => $value) {
+                $set[$this->name . '.' . $key . '.' . $attrName] = $value;
             }
         }
         
@@ -254,15 +333,10 @@ class Collection extends BaseCollection
             } elseif ($allowNulls && $member === null) {
                 continue;
             } elseif ($member !== null && !$member instanceof $this->membersClass) {
-                if (is_object($member)) {
-                    $type = 'instance of ' . get_class($member);
-                } else {
-                    $type = gettype($member);
-                }
                 throw new Exception\RuntimeException(sprintf(
                     "A member of the collection is not an instance of %s, received %s",
                     $this->membersClass,
-                    $type
+                    $this->varTypeForMsg($member)
                 ));
             }
         }
@@ -293,8 +367,19 @@ class Collection extends BaseCollection
     protected function discardChanges()
     {
         $this->changes = [
-            'deletions'  => [],
-            'insertions' => []
+            'deletions'    => [],
+            'insertions'   => [],
+            'replacements' => []
         ];
+    }
+    
+    protected function varTypeForMsg($var)
+    {
+        if (is_object($var)) {
+            $type = 'instance of ' . get_class($var);
+        } else {
+            $type = gettype($var);
+        }
+        return $type;
     }
 }

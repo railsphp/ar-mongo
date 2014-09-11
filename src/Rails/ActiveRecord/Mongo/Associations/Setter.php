@@ -3,13 +3,14 @@ namespace Rails\ActiveRecord\Mongo\Associations;
 
 use MongoDBRef;
 use Rails\ActiveRecord\Mongo\Base;
-// use Rails\ActiveRecord\Associations\CollectionProxy;
+use Rails\ActiveRecord\Mongo\Exception;
+use Rails\ActiveRecord\Mongo\Document\DocumentInterface;
 
 class Setter
 {
-    public function set(Base $record, $name, $value)
+    public function set(DocumentInterface $record, $name, $value)
     {
-        if ($value !== null && !$value instanceof Base) {
+        if ($value !== null && !is_array($value) && !$value instanceof DocumentInterface) {
             if (is_object($value)) {
                 $message = sprintf(
                     "Must pass instance of Rails\ActiveRecord\Mongo\Base as value, instance of %s passed",
@@ -17,7 +18,7 @@ class Setter
                 );
             } else {
                 $message = sprintf(
-                    "Must pass either null or instance of Rails\ActiveRecord\Mongo\Base as value, %s passed",
+                    "Must pass either null, array or instance of Rails\ActiveRecord\Mongo\Base as value, %s passed",
                     gettype($value)
                 );
             }
@@ -29,13 +30,30 @@ class Setter
         switch ($options['type']) {
             case 'belongsTo':
                 if ($value) {
-                    $this->matchClass($value, $options['className']);
+                    if (is_object($value)) {
+                        $this->matchClass($value, $options['className']);
+                        
+                        $dbref = MongoDBRef::create(
+                            $value->collectionName(),
+                            $value->id(),
+                            $value->connection()->databaseName()
+                        );
+                    } elseif (is_array($value)) {
+                        if (!MongoDBRef::isRef($value)) {
+                            throw new Exception\InvalidArgumentException(sprintf(
+                                "Array passed to %s::%s association is not a reference",
+                                get_class($record),
+                                $name
+                            ));
+                        }
+                        $dbref = $value;
+                    } else {
+                        throw new Exception\InvalidArgumentException(sprintf(
+                            "Value passed to %s::%s association must be either object or array, %s passed",
+                            gettype($value)
+                        ));
+                    }
                     
-                    $dbref = MongoDBRef::create(
-                        $value->collectionName(),
-                        $value->id(),
-                        $value->connection()->databaseName()
-                    );
                 } else {
                     $dbref = null;
                 }
@@ -104,6 +122,28 @@ class Setter
                     );
                 }
                 break;
+            
+            case 'hasMany':
+                if ($value instanceof Collection) {
+                    $value = $value->toArray();
+                } elseif (!is_array($value)) {
+                    throw new Exception\InvalidArgumentException(sprintf(
+                        "HasMany association accepts either array or instance of Mongo\Collection, %s passed",
+                        gettype($value)
+                    ));
+                }
+                
+                if (!empty($options['embedded'])) {
+                    $record->$name()->set($value);
+                    break;
+                }
+                break;
+            
+            default:
+                throw new Exception\InvalidArgumentException(sprintf(
+                    "Can't set unsupported association type %s",
+                    $options['type']
+                ));
         }
         
         return true;

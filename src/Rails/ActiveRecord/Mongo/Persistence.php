@@ -12,9 +12,19 @@ class Persistence
         $coll      = $baseClass::connection()->collection($baseClass::collectionName());
         $attrs     = $record->attributes();
         
-        # remove embedded attributes...
-        # TODO: must make a way to persist embedded documents.
-        $attrs = array_diff_key($attrs, $record->getAssociations()->embedded());
+        # Prepare array elements. Insert them as empty arrays.
+        # TODO: prepare object elements for belongsTo associations.
+        foreach ($record->getAssociations()->embedded() as $name => $type) {
+            if ($type == 'hasMany') {
+                if (!$record->getAssociation($name, false)) {
+                    $attrs[$name] = [];
+                } else {
+                    unset($attrs[$name]);
+                }
+            } else {
+                unset($attrs[$name]);
+            }
+        }
         
         if ($record->getAttributes()->isAttribute('createdAt')) {
             $attrs['createdAt'] = $this->createMongoDate();

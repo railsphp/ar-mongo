@@ -110,4 +110,17 @@ abstract class Base extends Document\Document
         }
         return $changed;
     }
+    
+    public function assignAttributes(array $attributes, $withoutProtection = false)
+    {
+        $assocs = $this->getAssociations();
+        foreach ($assocs->embedded() as $name => $type) {
+            if ($type == 'hasMany' && isset($attributes[$name])) {
+                $this->$name()->set($attributes[$name]);
+                unset($attributes[$name]);
+            }
+        }
+        
+        return parent::assignAttributes($attributes, $withoutProtection);
+    }
 }
